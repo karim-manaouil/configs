@@ -1,0 +1,9 @@
+source $VIMRUNTIME/defaults.vim
+set title
+set number
+set background=dark
+set mouse=a
+set tabstop=8
+set softtabstop=8
+set shiftwidth=8
+set noexpandtab
