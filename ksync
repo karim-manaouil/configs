@@ -1,0 +1,81 @@
+#!/bin/bash
+#
+# ksync
+#
+# Synchronize the current Linux kernel source tree to a remote build
+# machine. This script is designed around the author's workflow:
+#
+#   Local host : Snapdragon X Elite laptop (Cambridge, UK)
+#   Remote host: "lv" build VM (Las Vegas, USA)
+#   Build model: edit locally, build remotely
+#
+# Design goals:
+#
+#  - The remote tree is a mirror and is never edited directly.
+#  - Preserve the complete Git repository, including .git/, so remote
+#    git operations (grep, log, bisect, worktrees, debugging branches,
+#    etc.) remain available.
+#  - The remote destination is derived from the basename of the git
+#    toplevel directory only:
+#
+#        ~/linux/next      -> remote:~/linux/next
+#        ~/linux/mm        -> remote:~/linux/mm
+#        /foo/bar/baz/mm   -> remote:~/linux/mm
+#
+#  - Default remote host is "lv" but an alternate host may be supplied
+#    as the first command-line argument.
+#  - Use rsync so only changed files are transferred.
+#  - Do NOT use rsync --checksum (-c). Normal size+mtime comparison is
+#    significantly faster for a large kernel tree.
+#  - Use Zstandard compression because kernel source code compresses
+#    extremely well and the link has substantial geographic latency.
+#  - Do not preserve ownership or group information because local and
+#    remote systems use different account management schemes.
+#  - Use --delete-delay so the remote remains an exact mirror while
+#    applying deletions only after a successful transfer.
+#  - Exclude editor artifacts, IDE metadata and git lock files.
+#  - Build output is always outside the source tree and therefore does
+#    not require special exclusion rules.
+#
+# Notes:
+#
+#  - Timezone differences do not matter. rsync compares file mtimes
+#    using Unix timestamps rather than displayed local time.
+#  - Different UIDs/GIDs between systems are intentionally ignored.
+#  - Modern CPUs (Snapdragon X Elite and AMD EPYC Turin) make zstd
+#    compression effectively free compared to WAN transfer costs.
+#
+
+set -euo pipefail
+
+RSYNC_REMOTE=/usr/bin/rsync
+
+remote="${1:-lv}"
+
+top="$(git rev-parse --show-toplevel)"
+tree="$(basename "$top")"
+
+echo "Syncing ${top}"
+echo "      -> ${remote}:~/linux/${tree}"
+
+rsync \
+    --rsync-path="$RSYNC_REMOTE" \
+    -rlpt \
+    --zc=zstd \
+    --delete-delay \
+    --partial \
+    --mkpath \
+    --info=progress2,stats \
+    --human-readable \
+    --exclude='.vscode/' \
+    --exclude='.idea/' \
+    --exclude='*.swp' \
+    --exclude='*.swo' \
+    --exclude='*~' \
+    --exclude='.cache/' \
+    --exclude='.tmp_versions/' \
+    --exclude='.git/index.lock' \
+    --exclude='.git/rr-cache/' \
+    -e 'ssh -o RemoteCommand=none' \
+    "${top}/" \
+    "${remote}:~/linux/${tree}/"
